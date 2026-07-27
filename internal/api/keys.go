@@ -12,14 +12,10 @@ import (
 	"github.com/google/uuid"
 )
 
-type issueKeyRequest struct {
-	Name string `json:"name"`
-}
-
-type issueKeyResponse struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	APIKey  string `json:"api_key"` // 発行時にしか見せない生のキー
+type IssueKeyResult struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	APIKey string `json:"api_key"` // 発行時にしか見せない生のキー
 }
 
 func generateAPIKey() (string, error) {
@@ -30,49 +26,94 @@ func generateAPIKey() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-func (s *Server) issueKey(w http.ResponseWriter, r *http.Request) {
-	var body issueKeyRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Name == "" {
-		http.Error(w, "name is required", http.StatusBadRequest)
-		return
+// IssueKey は新しいAPIキーを発行する（HTTP・ネイティブバインディング共用）。
+func (s *Server) IssueKey(name string) (IssueKeyResult, error) {
+	if name == "" {
+		return IssueKeyResult{}, errNameRequired
 	}
 
 	raw, err := generateAPIKey()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return IssueKeyResult{}, err
 	}
 
 	ak := db.AgentKey{
 		ID:         uuid.NewString(),
-		Name:       body.Name,
+		Name:       name,
 		APIKeyHash: HashAPIKey(raw),
 		CreatedAt:  time.Now(),
 	}
 	if err := s.DB.Create(&ak).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return IssueKeyResult{}, err
 	}
 
-	writeJSON(w, http.StatusCreated, issueKeyResponse{ID: ak.ID, Name: ak.Name, APIKey: raw})
+	return IssueKeyResult{ID: ak.ID, Name: ak.Name, APIKey: raw}, nil
 }
 
-func (s *Server) listKeys(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListKeys() ([]db.AgentKey, error) {
 	var keys []db.AgentKey
-	s.DB.Order("created_at asc").Find(&keys)
-	writeJSON(w, http.StatusOK, keys)
+	err := s.DB.Order("created_at asc").Find(&keys).Error
+	return keys, err
 }
 
-func (s *Server) revokeKey(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+func (s *Server) RevokeKey(id string) error {
 	now := time.Now()
 	res := s.DB.Model(&db.AgentKey{}).Where("id = ? AND revoked_at IS NULL", id).Update("revoked_at", now)
 	if res.Error != nil {
-		http.Error(w, res.Error.Error(), http.StatusInternalServerError)
-		return
+		return res.Error
 	}
 	if res.RowsAffected == 0 {
-		http.Error(w, "key not found or already revoked", http.StatusNotFound)
+		return errKeyNotFound
+	}
+	return nil
+}
+
+var (
+	errNameRequired = &apiError{"name is required"}
+	errKeyNotFound  = &apiError{"key not found or already revoked"}
+)
+
+type apiError struct{ msg string }
+
+func (e *apiError) Error() string { return e.msg }
+
+// ─── HTTPハンドラー ────────────────────────────────────────────────────
+
+type issueKeyRequest struct {
+	Name string `json:"name"`
+}
+
+func (s *Server) httpIssueKey(w http.ResponseWriter, r *http.Request) {
+	var body issueKeyRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+
+	result, err := s.IssueKey(body.Name)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (s *Server) httpListKeys(w http.ResponseWriter, r *http.Request) {
+	keys, err := s.ListKeys()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, keys)
+}
+
+func (s *Server) httpRevokeKey(w http.ResponseWriter, r *http.Request) {
+	if err := s.RevokeKey(chi.URLParam(r, "id")); err != nil {
+		if err == errKeyNotFound {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

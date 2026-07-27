@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -13,10 +15,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// ingestEntryRequest はクライアントから受け取るフィールドのみを列挙する。
+// IngestEntryInput はクライアントから受け取るフィールドのみを列挙する。
 // id / received_at はサーバー側で必ず付与し、クライアント指定を無視することで
 // イミュータブル・改ざん防止の起点を保証する。
-type ingestEntryRequest struct {
+type IngestEntryInput struct {
 	Source  string `json:"source"`
 	AgentID string `json:"agent_id"`
 	Subject string `json:"subject"`
@@ -28,9 +30,9 @@ type ingestEntryRequest struct {
 	Outputs         map[string]any       `json:"outputs"`
 
 	Confidence struct {
-		Overall           float64             `json:"overall"`
-		Breakdown         db.ConfidenceBreakdown `json:"breakdown"`
-		LowConfidenceAreas []string            `json:"low_confidence_areas"`
+		Overall            float64                `json:"overall"`
+		Breakdown          db.ConfidenceBreakdown `json:"breakdown"`
+		LowConfidenceAreas []string               `json:"low_confidence_areas"`
 	} `json:"confidence"`
 
 	Decisions    []db.Decision `json:"decisions"`
@@ -40,17 +42,8 @@ type ingestEntryRequest struct {
 	Usage db.Usage `json:"usage"`
 }
 
-func (s *Server) ingestEntry(w http.ResponseWriter, r *http.Request) {
-	var body ingestEntryRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid body", http.StatusBadRequest)
-		return
-	}
-	if body.Status == "" || body.AgentID == "" {
-		http.Error(w, "agent_id and status are required", http.StatusBadRequest)
-		return
-	}
-
+// IngestEntry はエントリを1件追記する（HTTP・ネイティブバインディング共用）。
+func (s *Server) IngestEntry(body IngestEntryInput) (db.LedgerEntry, error) {
 	entry := db.LedgerEntry{
 		ID:         uuid.NewString(),
 		ReceivedAt: time.Now(),
@@ -76,99 +69,120 @@ func (s *Server) ingestEntry(w http.ResponseWriter, r *http.Request) {
 		Usage: body.Usage,
 	}
 
-	if err := s.DB.Create(&entry).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, entry)
+	err := s.DB.Create(&entry).Error
+	return entry, err
 }
 
-func (s *Server) getEntry(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
+func (s *Server) GetEntry(id string) (db.LedgerEntry, error) {
 	var entry db.LedgerEntry
-	if err := s.DB.First(&entry, "id = ?", id).Error; err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
-		return
-	}
-	writeJSON(w, http.StatusOK, entry)
+	err := s.DB.First(&entry, "id = ?", id).Error
+	return entry, err
 }
 
-// entryFilters はクエリパラメータから検索条件を組み立てる。search/export/statsで共用する。
-func entryFilters(r *http.Request, query *gorm.DB) *gorm.DB {
-	q := r.URL.Query()
+// EntryFilters は検索・集計・エクスポートで共用する絞り込み条件。
+type EntryFilters struct {
+	AgentID       string
+	Source        string
+	Status        string
+	Subject       string
+	Query         string
+	MinConfidence *float64
+	MaxConfidence *float64
+	From          *time.Time
+	To            *time.Time
+}
 
-	if v := q.Get("agent_id"); v != "" {
-		query = query.Where("agent_id = ?", v)
-	}
-	if v := q.Get("source"); v != "" {
-		query = query.Where("source = ?", v)
-	}
-	if v := q.Get("status"); v != "" {
-		query = query.Where("status = ?", v)
-	}
-	if v := q.Get("subject"); v != "" {
-		query = query.Where("subject LIKE ?", "%"+v+"%")
-	}
-	if v := q.Get("q"); v != "" {
-		query = query.Where("summary LIKE ?", "%"+v+"%")
+func FiltersFromQuery(q url.Values) EntryFilters {
+	f := EntryFilters{
+		AgentID: q.Get("agent_id"),
+		Source:  q.Get("source"),
+		Status:  q.Get("status"),
+		Subject: q.Get("subject"),
+		Query:   q.Get("q"),
 	}
 	if v := q.Get("min_confidence"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			query = query.Where("confidence_overall >= ?", f)
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			f.MinConfidence = &parsed
 		}
 	}
 	if v := q.Get("max_confidence"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			query = query.Where("confidence_overall <= ?", f)
+		if parsed, err := strconv.ParseFloat(v, 64); err == nil {
+			f.MaxConfidence = &parsed
 		}
 	}
 	if v := q.Get("from"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			query = query.Where("received_at >= ?", t)
+			f.From = &t
 		}
 	}
 	if v := q.Get("to"); v != "" {
 		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			query = query.Where("received_at <= ?", t)
+			f.To = &t
 		}
 	}
+	return f
+}
 
+func (f EntryFilters) apply(query *gorm.DB) *gorm.DB {
+	if f.AgentID != "" {
+		query = query.Where("agent_id = ?", f.AgentID)
+	}
+	if f.Source != "" {
+		query = query.Where("source = ?", f.Source)
+	}
+	if f.Status != "" {
+		query = query.Where("status = ?", f.Status)
+	}
+	if f.Subject != "" {
+		query = query.Where("subject LIKE ?", "%"+f.Subject+"%")
+	}
+	if f.Query != "" {
+		query = query.Where("summary LIKE ?", "%"+f.Query+"%")
+	}
+	if f.MinConfidence != nil {
+		query = query.Where("confidence_overall >= ?", *f.MinConfidence)
+	}
+	if f.MaxConfidence != nil {
+		query = query.Where("confidence_overall <= ?", *f.MaxConfidence)
+	}
+	if f.From != nil {
+		query = query.Where("received_at >= ?", *f.From)
+	}
+	if f.To != nil {
+		query = query.Where("received_at <= ?", *f.To)
+	}
 	return query
 }
 
-type entriesResponse struct {
+type SearchResult struct {
 	Entries []db.LedgerEntry `json:"entries"`
 	Total   int64            `json:"total"`
 }
 
-func (s *Server) listEntries(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit := 50
-	offset := 0
-	if v, err := strconv.Atoi(q.Get("limit")); err == nil && v > 0 && v <= 500 {
-		limit = v
+func (s *Server) SearchEntries(f EntryFilters, limit, offset int) (SearchResult, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 50
 	}
-	if v, err := strconv.Atoi(q.Get("offset")); err == nil && v >= 0 {
-		offset = v
+	if offset < 0 {
+		offset = 0
 	}
-
-	base := entryFilters(r, s.DB.Model(&db.LedgerEntry{}))
 
 	var total int64
-	base.Count(&total)
+	if err := f.apply(s.DB.Model(&db.LedgerEntry{})).Count(&total).Error; err != nil {
+		return SearchResult{}, err
+	}
 
 	var entries []db.LedgerEntry
-	entryFilters(r, s.DB).
+	err := f.apply(s.DB.Model(&db.LedgerEntry{})).
 		Order("received_at desc").
 		Limit(limit).
 		Offset(offset).
-		Find(&entries)
+		Find(&entries).Error
 
-	writeJSON(w, http.StatusOK, entriesResponse{Entries: entries, Total: total})
+	return SearchResult{Entries: entries, Total: total}, err
 }
 
-type statsResponse struct {
+type StatsResult struct {
 	Total             int64            `json:"total"`
 	ByStatus          map[string]int64 `json:"by_status"`
 	AvgConfidence     float64          `json:"avg_confidence"`
@@ -178,70 +192,137 @@ type statsResponse struct {
 
 const lowConfidenceThreshold = 0.6
 
-func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
-	base := entryFilters(r, s.DB.Model(&db.LedgerEntry{}))
-
+func (s *Server) Stats(f EntryFilters) (StatsResult, error) {
 	var total int64
-	base.Count(&total)
-
-	resp := statsResponse{Total: total, ByStatus: map[string]int64{}, ByAgent: map[string]int64{}}
-
-	if total > 0 {
-		var avg float64
-		entryFilters(r, s.DB.Model(&db.LedgerEntry{})).Select("avg(confidence_overall)").Row().Scan(&avg)
-		resp.AvgConfidence = avg
-
-		var lowCount int64
-		entryFilters(r, s.DB.Model(&db.LedgerEntry{})).Where("confidence_overall < ?", lowConfidenceThreshold).Count(&lowCount)
-		resp.LowConfidenceRate = float64(lowCount) / float64(total)
-
-		type statusCount struct {
-			Status db.EntryStatus
-			Count  int64
-		}
-		var statusCounts []statusCount
-		entryFilters(r, s.DB.Model(&db.LedgerEntry{})).Select("status, count(*) as count").Group("status").Scan(&statusCounts)
-		for _, sc := range statusCounts {
-			resp.ByStatus[string(sc.Status)] = sc.Count
-		}
-
-		type agentCount struct {
-			AgentID string
-			Count   int64
-		}
-		var agentCounts []agentCount
-		entryFilters(r, s.DB.Model(&db.LedgerEntry{})).Select("agent_id, count(*) as count").Group("agent_id").Scan(&agentCounts)
-		for _, ac := range agentCounts {
-			resp.ByAgent[ac.AgentID] = ac.Count
-		}
+	if err := f.apply(s.DB.Model(&db.LedgerEntry{})).Count(&total).Error; err != nil {
+		return StatsResult{}, err
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	resp := StatsResult{Total: total, ByStatus: map[string]int64{}, ByAgent: map[string]int64{}}
+	if total == 0 {
+		return resp, nil
+	}
+
+	var avg float64
+	f.apply(s.DB.Model(&db.LedgerEntry{})).Select("avg(confidence_overall)").Row().Scan(&avg)
+	resp.AvgConfidence = avg
+
+	var lowCount int64
+	f.apply(s.DB.Model(&db.LedgerEntry{})).Where("confidence_overall < ?", lowConfidenceThreshold).Count(&lowCount)
+	resp.LowConfidenceRate = float64(lowCount) / float64(total)
+
+	type statusCount struct {
+		Status db.EntryStatus
+		Count  int64
+	}
+	var statusCounts []statusCount
+	f.apply(s.DB.Model(&db.LedgerEntry{})).Select("status, count(*) as count").Group("status").Scan(&statusCounts)
+	for _, sc := range statusCounts {
+		resp.ByStatus[string(sc.Status)] = sc.Count
+	}
+
+	type agentCount struct {
+		AgentID string
+		Count   int64
+	}
+	var agentCounts []agentCount
+	f.apply(s.DB.Model(&db.LedgerEntry{})).Select("agent_id, count(*) as count").Group("agent_id").Scan(&agentCounts)
+	for _, ac := range agentCounts {
+		resp.ByAgent[ac.AgentID] = ac.Count
+	}
+
+	return resp, nil
 }
 
-func (s *Server) exportEntries(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ExportEntries(f EntryFilters) ([]db.LedgerEntry, error) {
 	var entries []db.LedgerEntry
-	entryFilters(r, s.DB.Model(&db.LedgerEntry{})).Order("received_at desc").Find(&entries)
+	err := f.apply(s.DB.Model(&db.LedgerEntry{})).Order("received_at desc").Find(&entries).Error
+	return entries, err
+}
 
-	format := r.URL.Query().Get("format")
-	if format == "csv" {
+func exportCSV(entries []db.LedgerEntry) string {
+	var buf bytes.Buffer
+	cw := csv.NewWriter(&buf)
+	cw.Write([]string{"id", "received_at", "source", "agent_id", "subject", "status", "confidence_overall", "summary"})
+	for _, e := range entries {
+		cw.Write([]string{
+			e.ID,
+			e.ReceivedAt.Format(time.RFC3339),
+			e.Source,
+			e.AgentID,
+			e.Subject,
+			string(e.Status),
+			strconv.FormatFloat(e.ConfidenceOverall, 'f', 3, 64),
+			e.Summary,
+		})
+	}
+	cw.Flush()
+	return buf.String()
+}
+
+// ─── HTTPハンドラー（外部プロセスからのIngestion用。薄いラッパー） ────────────
+
+func (s *Server) httpIngestEntry(w http.ResponseWriter, r *http.Request) {
+	var body IngestEntryInput
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if body.Status == "" || body.AgentID == "" {
+		http.Error(w, "agent_id and status are required", http.StatusBadRequest)
+		return
+	}
+
+	entry, err := s.IngestEntry(body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusCreated, entry)
+}
+
+func (s *Server) httpGetEntry(w http.ResponseWriter, r *http.Request) {
+	entry, err := s.GetEntry(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, entry)
+}
+
+func (s *Server) httpListEntries(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	result, err := s.SearchEntries(FiltersFromQuery(q), limit, offset)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) httpStats(w http.ResponseWriter, r *http.Request) {
+	result, err := s.Stats(FiltersFromQuery(r.URL.Query()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) httpExportEntries(w http.ResponseWriter, r *http.Request) {
+	entries, err := s.ExportEntries(FiltersFromQuery(r.URL.Query()))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if r.URL.Query().Get("format") == "csv" {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=ledger-export.csv")
-		cw := csv.NewWriter(w)
-		cw.Write([]string{"id", "received_at", "source", "agent_id", "subject", "status", "confidence_overall", "summary"})
-		for _, e := range entries {
-			cw.Write([]string{
-				e.ID,
-				e.ReceivedAt.Format(time.RFC3339),
-				e.Source,
-				e.AgentID,
-				e.Subject,
-				string(e.Status),
-				strconv.FormatFloat(e.ConfidenceOverall, 'f', 3, 64),
-				e.Summary,
-			})
-		}
-		cw.Flush()
+		w.Write([]byte(exportCSV(entries)))
 		return
 	}
 
