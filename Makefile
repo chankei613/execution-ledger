@@ -1,13 +1,20 @@
-.PHONY: run build test tidy smoke clean
+.PHONY: run ui build test lint tidy smoke clean
 
 run:
-	go run .
+	go run ./cmd/elserve
+
+ui:
+	cd frontend && npm run dev
 
 build:
-	go build -o execution-ledger .
+	wails build
 
 test:
 	go test ./...
+
+lint:
+	golangci-lint run ./internal/...
+	cd frontend && npm run lint
 
 smoke:
 	go run ./cmd/smoketest
@@ -17,3 +24,4 @@ tidy:
 
 clean:
 	rm -f execution-ledger *.db *.db-shm *.db-wal
+	rm -rf build/bin

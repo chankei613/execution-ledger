@@ -8,7 +8,7 @@ import "time"
 type EntryStatus string
 
 const (
-	StatusSuccess            EntryStatus = "success"
+	StatusSuccess             EntryStatus = "success"
 	StatusPartialSuccess      EntryStatus = "partial_success"
 	StatusFailed              EntryStatus = "failed"
 	StatusBlocked             EntryStatus = "blocked"
@@ -32,8 +32,8 @@ type ConfidenceBreakdown struct {
 
 type Decision struct {
 	Description            string   `json:"description"`
-	Rationale               string   `json:"rationale"`
-	AlternativesConsidered  []string `json:"alternatives_considered"`
+	Rationale              string   `json:"rationale"`
+	AlternativesConsidered []string `json:"alternatives_considered"`
 }
 
 type Action struct {
@@ -43,8 +43,8 @@ type Action struct {
 }
 
 type FollowUp struct {
-	Description    string         `json:"description"`
-	SuggestedTask  map[string]any `json:"suggested_task,omitempty"`
+	Description   string         `json:"description"`
+	SuggestedTask map[string]any `json:"suggested_task,omitempty"`
 }
 
 type Usage struct {
@@ -68,9 +68,9 @@ type LedgerEntry struct {
 	CriteriaResults []CriterionResult `gorm:"serializer:json" json:"criteria_results"`
 	Outputs         map[string]any    `gorm:"serializer:json" json:"outputs"`
 
-	ConfidenceOverall    float64             `gorm:"index" json:"confidence_overall"`
-	ConfidenceBreakdown  ConfidenceBreakdown `gorm:"serializer:json" json:"confidence_breakdown"`
-	LowConfidenceAreas   []string            `gorm:"serializer:json" json:"low_confidence_areas"`
+	ConfidenceOverall   float64             `gorm:"index" json:"confidence_overall"`
+	ConfidenceBreakdown ConfidenceBreakdown `gorm:"serializer:json" json:"confidence_breakdown"`
+	LowConfidenceAreas  []string            `gorm:"serializer:json" json:"low_confidence_areas"`
 
 	Decisions    []Decision `gorm:"serializer:json" json:"decisions"`
 	ActionsTaken []Action   `gorm:"serializer:json" json:"actions_taken"`

@@ -7,26 +7,40 @@ AIエージェント(comet-taskAI・ai-scheduler・独自スクリプトなど�
 
 詳細は [docs/spec.md](docs/spec.md) を参照。
 
-## 現在のステータス: Phase 1-2（Ingestion + 検索/集計/エクスポートAPI）完了
+## 現在のステータス: Phase 3（Wails + Vue3 UI）完了・Phase 4（仕上げ・配布）進行中
 
 - [x] Phase 0: プロジェクト立ち上げ
 - [x] Phase 1: データモデル・Ingestion API（追記専用・APIキー認証・ブートストラップ認証）
 - [x] Phase 2: 検索・フィルタ・集計・エクスポートAPI
-- [ ] Phase 3: Wails + Vue3 UI
+- [x] Phase 3: Wails + Vue3 UI（台帳ビュー・ダッシュボード・APIキー管理）
 - [ ] Phase 4: 仕上げ・署名・配布・LP
 
-## 使い方
+## 使い方（デスクトップアプリ）
+
+1. [Releases](../../releases) から自分のOS用のビルドをダウンロードして起動する
+2. 初回起動時、Settings画面で「Issue key」を押して最初のAPIキーを発行する（**この場でしか表示されないので必ずコピーする**）
+3. Settings画面に表示される Ingestion URL（例: `http://localhost:8421/api/v1/entries`）と発行したAPIキーを、記録させたいAIシステム（comet-taskAI・ai-scheduler・独自スクリプトなど）に設定する
+4. そのAIシステムが実行結果をPOSTすると、台帳ビューにリアルタイムで並び、ダッシュボードで集計を確認できる
+
+アプリはウインドウを閉じている間もIngestion APIを起動したまま待ち受け続ける。完全に終了するにはSettings画面の「Quit」を使う。
+
+## 使い方（開発・ヘッドレスサーバー）
 
 ```bash
 make tidy   # 依存解決
 make smoke  # bootstrap鍵発行 → ingest → 検索 → 集計 → エクスポート の一連を確認する自己完結テスト
-make run    # :8421 でAPIサーバー起動（SQLite: execution-ledger.db）
+make run    # :8421 でAPIサーバー起動（SQLite: execution-ledger.db、cmd/elserve）
+make ui     # frontend/ の vite dev サーバー起動
 ```
+
+デスクトップアプリとしてビルドするには `wails build`（`wails.json` 参照）。
 
 ### APIキー認証
 
 `AgentKey`が0件のときのみ `POST /api/v1/keys` を未認証で許可する（最初の1件を発行するため）。
 1件発行された時点で以降は `Authorization: Bearer <key>` が必須になる。
+デスクトップアプリのUI自身はネイティブバインディング経由でデータを読むためAPIキーを必要としない。
+APIキーが必要なのは外部プロセスからのIngestion（`POST /api/v1/entries`）のみ。
 
 ### エントリの記録（イミュータブル）
 

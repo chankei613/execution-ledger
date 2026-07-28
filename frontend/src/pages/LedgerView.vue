@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { onMounted } from 'vue'
 import { useEntriesStore } from '@/stores/entries'
 import { useI18n } from '@/i18n'
 import { statusRole, statusIcon, STATUS_COLORS } from '@/statusColors'
@@ -122,6 +122,10 @@ onMounted(() => store.search())
 
     <!-- タイムライン -->
     <main class="flex-1 overflow-y-auto p-4">
+      <div v-if="store.error" class="text-sm border rounded px-3 py-2 mb-3" :style="{ borderColor: STATUS_COLORS.critical.light, color: STATUS_COLORS.critical.light }">
+        {{ t('error.prefix') }}{{ store.error }}
+        <button @click="store.search" class="ml-2 underline">{{ t('error.retry') }}</button>
+      </div>
       <div v-if="store.loading" class="text-sm text-muted-foreground">{{ t('ledger.loading') }}</div>
       <div v-else-if="store.entries.length === 0" class="text-sm text-muted-foreground">{{ t('ledger.empty') }}</div>
 

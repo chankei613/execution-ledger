@@ -1,6 +1,11 @@
-linters:
+version: "2"
+
+formatters:
   enable:
     - gofmt
+
+linters:
+  enable:
     - govet
     - staticcheck
     - errcheck

@@ -32,6 +32,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'ledger.page.of': '{from}–{to} of {total}',
     'ledger.lowConfidence': 'low confidence',
 
+    'error.prefix': 'Error: ',
+    'error.retry': 'Retry',
+
     'detail.title': 'Entry detail',
     'detail.close': 'Close',
     'detail.summary': 'Summary',
@@ -100,6 +103,9 @@ const messages: Record<Locale, Record<string, string>> = {
     'ledger.page.next': '次へ',
     'ledger.page.of': '{total}件中 {from}–{to}',
     'ledger.lowConfidence': '低信頼度',
+
+    'error.prefix': 'エラー: ',
+    'error.retry': '再試行',
 
     'detail.title': 'エントリ詳細',
     'detail.close': '閉じる',

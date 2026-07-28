@@ -38,7 +38,12 @@ const agentBars = computed(() => {
   <div class="p-6 space-y-6 overflow-y-auto h-full">
     <h2 class="text-sm font-semibold">{{ t('dashboard.title') }}</h2>
 
-    <div v-if="store.total === 0" class="text-sm text-muted-foreground">{{ t('dashboard.empty') }}</div>
+    <div v-if="store.error" class="text-sm border rounded px-3 py-2" :style="{ borderColor: STATUS_COLORS.critical.light, color: STATUS_COLORS.critical.light }">
+      {{ t('error.prefix') }}{{ store.error }}
+      <button @click="store.load" class="ml-2 underline">{{ t('error.retry') }}</button>
+    </div>
+    <div v-else-if="store.loading" class="text-sm text-muted-foreground">{{ t('ledger.loading') }}</div>
+    <div v-else-if="store.total === 0" class="text-sm text-muted-foreground">{{ t('dashboard.empty') }}</div>
 
     <template v-else>
       <!-- 統計カード（単一の見出し数値には図表ではなくstat tileが適切） -->

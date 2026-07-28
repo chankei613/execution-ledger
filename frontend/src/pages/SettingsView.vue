@@ -42,6 +42,11 @@ function fmt(v: any): string {
   <div class="p-6 space-y-6 max-w-xl overflow-y-auto h-full">
     <h2 class="text-sm font-semibold">{{ t('settings.title') }}</h2>
 
+    <div v-if="store.error" class="text-sm border rounded px-3 py-2" style="border-color: #d64545; color: #d64545">
+      {{ t('error.prefix') }}{{ store.error }}
+      <button @click="store.load" class="ml-2 underline">{{ t('error.retry') }}</button>
+    </div>
+
     <section class="space-y-2">
       <h3 class="text-xs font-semibold text-muted-foreground">{{ t('settings.ingestion.title') }}</h3>
       <p class="text-xs text-muted-foreground">{{ t('settings.ingestion.desc') }}</p>
@@ -74,7 +79,8 @@ function fmt(v: any): string {
         <button @click="issue" class="text-sm px-3 py-1.5 rounded bg-gray-900 text-white">{{ t('settings.keys.issue') }}</button>
       </div>
 
-      <div v-if="store.keys.length === 0" class="text-xs text-muted-foreground">{{ t('settings.keys.empty') }}</div>
+      <div v-if="store.loading" class="text-xs text-muted-foreground">{{ t('ledger.loading') }}</div>
+      <div v-else-if="store.keys.length === 0" class="text-xs text-muted-foreground">{{ t('settings.keys.empty') }}</div>
       <ul v-else class="space-y-1">
         <li
           v-for="k in store.keys"

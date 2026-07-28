@@ -204,7 +204,9 @@ func (s *Server) Stats(f EntryFilters) (StatsResult, error) {
 	}
 
 	var avg float64
-	f.apply(s.DB.Model(&db.LedgerEntry{})).Select("avg(confidence_overall)").Row().Scan(&avg)
+	if err := f.apply(s.DB.Model(&db.LedgerEntry{})).Select("avg(confidence_overall)").Row().Scan(&avg); err != nil {
+		return StatsResult{}, err
+	}
 	resp.AvgConfidence = avg
 
 	var lowCount int64
@@ -243,9 +245,10 @@ func (s *Server) ExportEntries(f EntryFilters) ([]db.LedgerEntry, error) {
 func exportCSV(entries []db.LedgerEntry) string {
 	var buf bytes.Buffer
 	cw := csv.NewWriter(&buf)
-	cw.Write([]string{"id", "received_at", "source", "agent_id", "subject", "status", "confidence_overall", "summary"})
+	// bytes.Buffer 書き込みは実質的に失敗しないため、エラーは意図的に無視する
+	_ = cw.Write([]string{"id", "received_at", "source", "agent_id", "subject", "status", "confidence_overall", "summary"})
 	for _, e := range entries {
-		cw.Write([]string{
+		_ = cw.Write([]string{
 			e.ID,
 			e.ReceivedAt.Format(time.RFC3339),
 			e.Source,
@@ -322,17 +325,18 @@ func (s *Server) httpExportEntries(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("format") == "csv" {
 		w.Header().Set("Content-Type", "text/csv")
 		w.Header().Set("Content-Disposition", "attachment; filename=ledger-export.csv")
-		w.Write([]byte(exportCSV(entries)))
+		_, _ = w.Write([]byte(exportCSV(entries)))
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", "attachment; filename=ledger-export.json")
-	json.NewEncoder(w).Encode(entries)
+	_ = json.NewEncoder(w).Encode(entries)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
+	// レスポンスヘッダー送信後のエンコードエラーはクライアント切断等でリカバリ不能なため意図的に無視する
+	_ = json.NewEncoder(w).Encode(v)
 }

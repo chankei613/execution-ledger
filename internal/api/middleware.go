@@ -63,8 +63,3 @@ func APIKeyAuth(conn *gorm.DB, bootstrapPaths ...string) func(http.Handler) http
 		})
 	}
 }
-
-func agentKeyFromContext(r *http.Request) *db.AgentKey {
-	ak, _ := r.Context().Value(agentKeyCtxKey).(*db.AgentKey)
-	return ak
-}

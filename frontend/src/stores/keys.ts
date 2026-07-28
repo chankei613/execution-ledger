@@ -31,13 +31,23 @@ export const useKeysStore = defineStore('keys', {
       }
     },
     async issue(name: string) {
-      const result = await IssueKey(name)
-      this.lastIssuedKey = { name: result.name, apiKey: result.api_key }
-      await this.load()
+      this.error = null
+      try {
+        const result = await IssueKey(name)
+        this.lastIssuedKey = { name: result.name, apiKey: result.api_key }
+        await this.load()
+      } catch (e) {
+        this.error = String(e)
+      }
     },
     async revoke(id: string) {
-      await RevokeKey(id)
-      await this.load()
+      this.error = null
+      try {
+        await RevokeKey(id)
+        await this.load()
+      } catch (e) {
+        this.error = String(e)
+      }
     },
     dismissIssuedKey() {
       this.lastIssuedKey = null
