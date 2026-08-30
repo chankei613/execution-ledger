@@ -7,13 +7,18 @@ AIエージェント(comet-taskAI・ai-scheduler・独自スクリプトなど�
 
 詳細は [docs/spec.md](docs/spec.md) を参照。
 
-## 現在のステータス: Phase 3（Wails + Vue3 UI）完了・Phase 4（仕上げ・配布）進行中
+## 現在のステータス: v0.1.0 リリース済み
 
 - [x] Phase 0: プロジェクト立ち上げ
 - [x] Phase 1: データモデル・Ingestion API（追記専用・APIキー認証・ブートストラップ認証）
 - [x] Phase 2: 検索・フィルタ・集計・エクスポートAPI
 - [x] Phase 3: Wails + Vue3 UI（台帳ビュー・ダッシュボード・APIキー管理）
-- [ ] Phase 4: 仕上げ・署名・配布・LP
+- [x] Phase 4: 仕上げ・署名・配布・LP
+
+macOSアプリ（署名・公証済み、Apple Silicon / Intel 共通のUniversalバイナリ）は
+[GitHub Releases](https://github.com/chankei613/execution-ledger/releases) から、
+ランディングページは https://execution-ledger-virid.vercel.app/ から入手できる。
+（アプリ内Help画面は未対応 — 使い方は本READMEを参照）
 
 ## 使い方（デスクトップアプリ）
 
